@@ -1,199 +1,123 @@
-<div align="center">
+# ECG topology
 
-# 🫀 TDA for ECG Signal Processing
+Topological data analysis of RR-interval series: a research prototype for detecting heart failure and atrioventricular (AV) block from the shape of the heartbeat dynamics.
 
-### Topological Data Analysis for Time Series
-**State of the Art and Mathematical Development**
-*Application to ECG Signal Processing for Heart Failure and AV Block Detection*
+**Status: research proposal with a working prototype.** The pipeline runs end to end on synthetic data. It has not been validated on real recordings yet.
 
 ---
 
-![Doctoral Thesis](https://img.shields.io/badge/Type-Doctoral%20Thesis-4a90d9?style=for-the-badge)
-![Department](https://img.shields.io/badge/Dept.-Mathematics%20%26%20Signal%20Processing-6c63ff?style=for-the-badge)
-![Year](https://img.shields.io/badge/Year-2026-e74c3c?style=for-the-badge)
-![Status](https://img.shields.io/badge/Status-Research%20Stage-27ae60?style=for-the-badge)
+## Idea
 
-</div>
+A scalar series such as the RR intervals of an ECG can be turned into a point cloud by delay embedding (Takens). If the heart rhythm is quasi-periodic, the cloud has a loop; if it is irregular, the loop breaks up; if beats are dropped, outlying clusters appear. Persistent homology measures these structures at all scales without choosing a threshold, and its summaries can feed a classifier.
 
----
+```
+RR series ──► delay embedding ──► alpha filtration ──► persistent homology ──► features ──► classifier / window score
+              (R^3, delay in beats)   (GUDHI)            (H0, H1)               (9 features)
+```
 
-## 📖 Overview
+Research questions:
 
-Classical time series analysis (ARIMA, SARIMA, Fourier transforms) struggles with **nonlinear, non-stationary signals** that exhibit chaotic or quasi-periodic behavior. This thesis bridges that gap by combining **algebraic topology** with **signal processing** through Topological Data Analysis (TDA).
+1. How should Takens' embedding be applied to physiological series, and with which parameters?
+2. Which topological features are most informative for cardiac classification?
+3. Can persistent homology detect changes in cardiac dynamics before they are clinically manifest in heart failure?
+4. Does restricting the embedding to $d \le 3$ give a useful trade-off between cost and clinical interpretability?
 
-> *"Data has shape, shape has meaning, and meaning drives value."*
+## Quick start
 
-The central insight: when a time series is embedded into a higher-dimensional phase space, it reveals **topological structures** — loops, voids, and connected components — that are invisible to traditional statistical methods. This work systematically applies that insight to cardiac signals.
+Requires Python 3.12 or later and [uv](https://docs.astral.sh/uv/).
 
----
+```bash
+uv sync
+uv run pytest                          # unit tests
+uv run python scripts/run_demo.py      # synthetic demo, ~40 s, writes figures/
+```
 
-## 🎯 Research Questions
+```python
+from ecgtda import synthetic, tda_features, hrv_features
 
-1. How can **Takens' embedding** be optimally applied to physiological time series?
-2. What **topological features** are most informative for cardiac signal classification?
-3. Can **persistent homology** detect subtle changes in cardiac dynamics *before* clinical manifestation of heart failure?
-4. How can the dimensionality constraint (**d ≤ 3**) be leveraged for clinical interpretability?
+series = synthetic.generate("mobitz1", n_beats=200, seed=1)   # Wenckebach block
+tda_features(series.rr)    # {'h0_max': ..., 'h1_entropy': ..., ...}
+hrv_features(series.rr)    # {'sdnn': ..., 'rmssd': ..., ...}
+```
 
----
+Rhythm kinds: `nsr`, `chf`, `av1`, `mobitz1`, `mobitz2`, `pavb`. See [docs/03-synthetic-demo.md](docs/03-synthetic-demo.md).
 
-## 🧠 Key Innovations
+## Synthetic demo
 
-| Feature | Description |
+The generator simulates atrial rhythm and AV conduction, so block patterns come out of the conduction model. Ground truth is known, which allows a negative control: first-degree block does not change the RR series and must not be separable.
+
+![Delay embeddings](figures/fig_02_embedding_3d.png)
+
+![Persistence diagrams](figures/fig_03_persistence_diagrams.png)
+
+| 3-class task: normal vs CHF-like vs AV block II | Random forest | SVM |
+|---|---|---|
+| HRV baseline (SDNN, RMSSD, pNN50, ...) | 0.983 | 0.944 |
+| Topological features | 0.967 | 0.946 |
+| HRV + topological | 0.972 | 0.962 |
+
+Accuracy, 5-fold cross-validation repeated 3 times, 80 windows per class. Negative control (normal vs first-degree block): about 0.5 for all feature sets.
+
+What this means. The code works and the diagrams look like the theory says. On synthetic data topological features do about as well as classical HRV and not better, and a pause detector as simple as the longest RR interval matches them on paroxysmal block. That is expected, because the generator only contains effects HRV also sees. Whether topology adds information is the open question this project is built to answer, on real recordings. The demo is not evidence about patients.
+
+## Repository layout
+
+```
+ecgtda/               Python package
+  synthetic.py          synthetic RR generators (6 rhythm kinds)
+  embedding.py          Takens embedding, delay selection by mutual information
+  topology.py           alpha-complex persistent homology (GUDHI), diagram features
+  hrv.py                classical HRV baseline features
+  pipeline.py           RR -> cloud -> features, sliding windows
+scripts/run_demo.py   synthetic demo: figures and results table
+tests/                unit tests
+figures/              demo output (PNG and demo_results.md)
+docs/                 technical documentation
+thesis_bg/            background document (thesis_tda_ecg.docx)
+notebooks/            earlier exploration of single heartbeats (see note)
+```
+
+Note on `notebooks/`. This folder holds the first exploration: Takens embeddings of single MIT-BIH heartbeats from the 187-sample CSV format. It is a different object from the RR pipeline above (one beat versus the beat-to-beat series), so it is not connected to `ecgtda`. `Processing.py` and `EDA.ipynb` read from hard-coded `C:\CODE\...` paths and need the CSV files (git-ignored) to run.
+
+## Documentation
+
+| Document | Content |
 |---|---|
-| 🔷 **Geometric Interpretation** | Topological features provide intuitive geometric views of complex dynamics |
-| 📏 **Multiscale Analysis** | Persistent homology captures structure across *all scales* without arbitrary thresholds |
-| 🛡️ **Noise Robustness** | Stability theorems guarantee robustness against perturbations |
-| 🌀 **Nonlinear Dynamics** | Naturally handles chaotic and nonlinear behavior |
+| [01 Theoretical background](docs/01-theoretical-background.md) | persistent homology, filtrations, Takens, stability, feature definitions |
+| [02 Methodology](docs/02-methodology.md) | detection targets, pipeline, open design decisions, validation plan |
+| [03 Synthetic demo](docs/03-synthetic-demo.md) | generator, results, what the demo can and cannot show |
+| [References](docs/references.md) | bibliography with verification status |
 
----
+## Roadmap
 
-## 📐 Mathematical Framework
+- [ ] Real data: RR series from PhysioNet (Congestive Heart Failure RR Interval Database and a normal-rhythm counterpart), subject-wise splits
+- [ ] R-peak detection and ectopic-beat handling for raw ECG
+- [ ] Decide what is embedded: RR series or the ECG waveform (see methodology, 2.3)
+- [ ] Sensitivity analysis: embedding dimension, delay, $H_1$ threshold, window length
+- [ ] Compare against HRV (time and frequency domain) and a longest-RR detector with confidence intervals
+- [ ] Source with annotated paroxysmal AV block, or reframe that target
+- [ ] Multi-lead ECG with multivariate persistence; other signals (EEG, respiration)
 
-```
-Univariate ECG Signal
-        │
-        ▼
-┌───────────────────────┐
-│  Takens' Embedding    │  τ = 1/3 avg. heartbeat duration
-│  R-R series → R³     │  d = 3 (efficiency + interpretability)
-└───────────┬───────────┘
-            │
-            ▼
-┌───────────────────────┐
-│  Alpha Complex        │  Preferred over Vietoris-Rips in R³
-│  Filtration           │  for geometric fidelity
-└───────────┬───────────┘
-            │
-            ▼
-┌───────────────────────┐
-│  Persistent Homology  │  H₀ (components), H₁ (loops), H₂ (voids)
-│  Computation          │  → Persistence Diagrams
-└───────────┬───────────┘
-            │
-            ▼
-┌───────────────────────┐
-│  Feature Extraction   │  Topological indices, persistence measures,
-│  + Classification     │  cardiac-specific signatures → SVM / Random Forest
-└───────────────────────┘
-```
+## Key references
 
-### Core Theoretical Pillars
+Full list in [docs/references.md](docs/references.md).
 
-- **Takens' Theorem (1981)** — Phase space reconstruction from a single observed time series via time-delay embedding
-- **Persistent Homology** — Tracks birth and death of topological features across filtration scales
-- **Stability Theorem (Cohen-Steiner et al., 2007)** — Guarantees small perturbations in data produce small changes in persistence diagrams (bottleneck/Wasserstein distance)
+- Edelsbrunner, Letscher & Zomorodian (2002), *Topological persistence and simplification*.
+- Takens (1981), *Detecting strange attractors in turbulence*.
+- Cohen-Steiner, Edelsbrunner & Harer (2007), *Stability of persistence diagrams*.
+- Graff et al. (2021), *Persistent homology as a new method of the assessment of heart rate variability*, PLOS ONE 16(7).
+- Emrani, Gentimis & Krim (2014), *Persistent homology of delay embeddings and its application to wheeze detection*.
 
----
-
-## 🫀 Application: ECG Analysis
-
-### Detection Targets
-
-**Heart Failure**
-- Altered autonomic regulation → changes in HRV patterns
-- Topological signature: fewer persistent H₁ features, altered persistence value distribution
-- Reduced complexity of cardiac attractor
-
-**AV Blocks**
-- Blocked beats → characteristic patterns in embedded attractor
-- Abnormally long R-R intervals appear as outliers in the point cloud
-- Regular cycle structure disruption → new connected components in sublevel set filtration
-- Paroxysmal AV blocks: detected via **sliding window analysis** and sudden changes in persistence diagrams
-
-### Methodology Pipeline
-
-```
-Step 1 │ PREPROCESSING     → Baseline wander removal, R-peak detection, artifact handling
-Step 2 │ EMBEDDING         → R-R intervals embedded in R³ via Takens' theorem
-Step 3 │ FILTRATION        → Alpha complex construction from point cloud
-Step 4 │ HOMOLOGY          → Persistent homology for H₀ and H₁
-Step 5 │ FEATURES          → Topological indices + cardiac-specific measures
-Step 6 │ CLASSIFICATION    → SVM / Random Forest on topological feature vectors
-```
-
----
-
-## 📚 Thesis Structure
-
-```
-📄 thesis_tda_ecg/
-├── 1. Introduction
-│   └── Motivation, objectives, research questions
-├── 2. State of the Art
-│   ├── 2.1  TDA Foundations
-│   ├── 2.2  Persistent Homology Theory
-│   ├── 2.3  Time Series Analysis via TDA
-│   └── 2.4  Applications to Physiological Signals
-├── 3. Mathematical Framework
-│   ├── 3.1  Takens' Embedding Theorem
-│   ├── 3.2  Simplicial Complexes & Filtrations
-│   ├── 3.3  Persistent Homology Computation
-│   └── 3.4  Stability and Robustness
-├── 4. Application to ECG Analysis
-│   ├── 4.1  Cardiac Signal Characteristics
-│   ├── 4.2  Proposed Methodology
-│   └── 4.3  Detection of Heart Failure and AV Blocks
-└── 5. Conclusions and Future Work
-```
-
----
-
-## 🔬 Tools & Software
-
-| Library | Purpose |
-|---|---|
-| [GUDHI](https://gudhi.inria.fr/) | Persistent homology computation |
-| [Ripser](https://github.com/Ripser/ripser) | Efficient Vietoris-Rips persistence |
-| [Dionysus](https://www.mrzv.org/software/dionysus2/) | Topological data analysis |
-| Scikit-learn | SVM & Random Forest classifiers |
-| NumPy / SciPy | Signal processing & numerical computation |
-
----
-
-## 🚀 Future Work
-
-- [ ] Large-scale validation on public ECG databases (PhysioNet, MIT-BIH)
-- [ ] Real-time algorithms for online cardiac monitoring
-- [ ] Multivariate persistent homology for multi-lead ECG
-- [ ] Integration with deep learning (end-to-end classification)
-- [ ] Extension to EEG, EMG, and respiratory signals
-
----
-
-## 📑 Key References
-
-1. Edelsbrunner, Letscher & Zomorodian (2002) — *Topological persistence and simplification*
-2. Takens (1981) — *Detecting strange attractors in turbulence*
-3. Graff et al. (2021) — *Persistent homology for heart rate variability assessment*
-4. Emrani, Gentimis & Krim (2014) — *Persistent homology of delay embeddings for wheeze detection*
-5. Cohen-Steiner, Edelsbrunner & Harer (2007) — *Stability of persistence diagrams*
-6. Biagetti et al. (2021) — *Heart disease classification based on persistent homology*
-
-> Full bibliography available in the thesis document.
-
----
-
-## 📄 Citation
+## Citation
 
 ```bibtex
-@phdthesis{tda_ecg_2026,
-  title     = {Topological Data Analysis for Time Series:
-               State of the Art and Mathematical Development.
-               Application to ECG Signal Processing for
-               Heart Failure and AV Block Detection},
-  school    = {Department of Mathematics and Signal Processing},
-  year      = {2026},
-  month     = {March},
-  type      = {Doctoral Thesis}
+@misc{villarreal2026ecgtopology,
+  author = {Villarreal De La Cerda, Diego},
+  title  = {Topological data analysis of RR-interval series for heart failure and AV block detection},
+  year   = {2026},
+  note   = {Research proposal and prototype code},
+  url    = {https://github.com/DiegoVilla03/ecg_topology}
 }
 ```
 
----
-
-<div align="center">
-
-*© 2026 — Doctoral Thesis, Department of Mathematics and Signal Processing*
-
-**"The intersection of algebraic topology and signal processing represents a fertile ground for innovation."**
-
-</div>
+Diego Villarreal De La Cerda, 2026.

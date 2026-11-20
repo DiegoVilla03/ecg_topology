@@ -21,3 +21,6 @@ wheels/
 
 
 
+
+# Tooling caches
+.pytest_cache/
